@@ -1,17 +1,23 @@
+import argparse
+
 import torch
 import torch.backends.cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
-from torch.cuda.amp import GradScaler, autocast
+from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR10
 from torchvision.models import resnet18
 from tqdm import tqdm
 
 from knn_test import test
+from wasserstein import WassersteinLoss
 
 torch.backends.cudnn.benchmark = True
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--loss", type=str, default="barlow")
 
 
 class DoubleTransform:
@@ -104,8 +110,13 @@ class BarlowLoss(nn.Module):
 
 
 if __name__ == "__main__":
+    args = parser.parse_args()
+
     model = BarlowTwin(dim=128).cuda()
-    criterion = BarlowLoss(llambda=0.005)
+    criterion = {
+        "barlow": BarlowLoss(llambda=0.005),
+        "wasserstein": WassersteinLoss(llambda=0.005),
+    }[args.loss]
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-3, weight_decay=1e-6)
     scaler = GradScaler()
 
@@ -115,15 +126,13 @@ if __name__ == "__main__":
         loss_avg = 0.
         batch_load = tqdm(db.train)
         for idx, ((y_a, y_b), _) in enumerate(batch_load, start=1):
-            with autocast():
-                _, z_a = model(y_a.cuda(non_blocking=True))
-                _, z_b = model(y_b.cuda(non_blocking=True))
-                loss = criterion(z_a, z_b)
+            _, z_a = model(y_a.cuda(non_blocking=True))
+            _, z_b = model(y_b.cuda(non_blocking=True))
+            loss = criterion(z_a, z_b)
 
             model.zero_grad(set_to_none=True)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            loss.backward()
+            optimizer.step()
 
             loss_avg += (loss.item() - loss_avg) / idx
             batch_load.set_description(f"{epoch:3d}, loss={loss_avg:.3f}")
