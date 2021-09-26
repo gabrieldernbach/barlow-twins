@@ -110,6 +110,7 @@ if __name__ == "__main__":
     scaler = GradScaler()
 
     epochs = 1000
+    best_score = 0.
     db = DataBunch()
     for epoch in range(epochs):
         loss_avg = 0.
@@ -130,3 +131,7 @@ if __name__ == "__main__":
 
         if epoch % 5 == 0:
             test_acc_1, test_acc_5 = test(model, db)
+            if test_acc_1 > best_score:
+                best_score = test_acc_1
+                torch.save(model.state_dict(), "ckpt.pt")
+                print("saving checkpoint")
