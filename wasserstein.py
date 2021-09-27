@@ -2,9 +2,12 @@ import torch
 import torch.nn as nn
 
 def sqrtm(X):
-    vals, vecs = torch.symeig(X, eigenvectors=True)
-    vals = torch.diag(torch.sqrt(vals))
-    return vecs @ vals @ vecs.T
+    # even with eps this is unstable?
+    # eps = torch.eye(len(X), device="cuda") * 1e-3
+    # vals, vecs = torch.symeig(X + eps, eigenvectors=True)
+    u, s, v = torch.svd(X)
+    s = torch.diag(torch.sqrt(s))
+    return u @ s @ v.T
 
 def wasserstein(A, B):
     B12 = sqrtm(B)

@@ -12,7 +12,7 @@ from torchvision.models import resnet18
 from tqdm import tqdm
 
 from knn_test import test
-from wasserstein import WassersteinLoss
+from wasserstein import WassersteinBarlow
 
 torch.backends.cudnn.benchmark = True
 
@@ -115,7 +115,7 @@ if __name__ == "__main__":
     model = BarlowTwin(dim=128).cuda()
     criterion = {
         "barlow": BarlowLoss(llambda=0.005),
-        "wasserstein": WassersteinLoss(llambda=0.005),
+        "wasserstein": WassersteinBarlow(llambda=0.005),
     }[args.loss]
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-3, weight_decay=1e-6)
     scaler = GradScaler()
