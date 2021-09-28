@@ -12,12 +12,13 @@ from torchvision.models import resnet18
 from tqdm import tqdm
 
 from knn_test import test
-from wasserstein import WassersteinBarlow
+from wasserstein import WassersteinCov, Riemann
 
 torch.backends.cudnn.benchmark = True
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--loss", type=str, default="barlow")
+parser.add_argument("--lr", type=float, default=0.001)
 
 
 class DoubleTransform:
@@ -115,10 +116,11 @@ if __name__ == "__main__":
     model = BarlowTwin(dim=128).cuda()
     criterion = {
         "barlow": BarlowLoss(llambda=0.005),
-        "wasserstein": WassersteinBarlow(llambda=0.005),
+        "wasserstein": WassersteinCov(llambda=0.005),
+        "kl": Riemann(llambda=0.005),
     }[args.loss]
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-3, weight_decay=1e-6)
-    scaler = GradScaler()
+    # optimizer = torch.optim.Adam(params=model.parameters(), lr=args.lr, weight_decay=1e-6)
+    optimizer = torch.optim.SGD(params=model.parameters(), lr=args.lr)
 
     epochs = 1000
     db = DataBunch()
@@ -133,6 +135,13 @@ if __name__ == "__main__":
             model.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
+
+            total_norm = 0.
+            for p in model.parameters():
+                param_norm = p.grad.detach().data.norm(2)
+                total_norm += param_norm.item() ** 2
+            total_norm = total_norm ** 0.5
+            print(total_norm)
 
             loss_avg += (loss.item() - loss_avg) / idx
             batch_load.set_description(f"{epoch:3d}, loss={loss_avg:.3f}")
