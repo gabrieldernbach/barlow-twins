@@ -78,7 +78,7 @@ class BarlowTwin(nn.Module):
             nn.Linear(512, 512, bias=False),
             nn.ReLU(inplace=True),
             nn.BatchNorm1d(512),
-            nn.Linear(512, dim, bias=True),
+            nn.Linear(2048, dim, bias=True),
         )
 
     def forward(self, x):
