@@ -10,38 +10,55 @@ def test(net, db):
     c = 10
 
     net.eval()
-    total_top1, total_top5, total_num, feature_bank, target_bank = 0.0, 0.0, 0, [], []
+    total_top1, total_top5, total_num = 0.0, 0.0, 0
+    
+    # Memory-efficient feature extraction
+    feature_bank = []
+    target_bank = []
+    
     with torch.no_grad():
-        # generate feature bank and target bank
+        # Generate feature bank and target bank with memory optimization
         for data, target in tqdm(db.memory, desc='Feature extracting'):
+            feature, _ = net(data.cuda(non_blocking=True))
+            # Detach and move to CPU to save GPU memory
+            feature_bank.append(feature.detach().cpu())
             target_bank.append(target)
-            feature, out = net(data.cuda(non_blocking=True))
-            feature_bank.append(feature)
-        # [D, N]
-        feature_bank = torch.cat(feature_bank, dim=0).t().contiguous()
-        # [N]
-        feature_labels = torch.cat(target_bank, dim=0).contiguous().to(feature_bank.device)
-        # loop test data to predict the label by weighted knn search
+            
+        # Concatenate on CPU first, then move to GPU
+        feature_bank = torch.cat(feature_bank, dim=0)
+        feature_labels = torch.cat(target_bank, dim=0)
+        
+        # Move to GPU only when needed and transpose
+        feature_bank = feature_bank.cuda().t().contiguous()
+        feature_labels = feature_labels.cuda().contiguous()
+        
+        # Process test data in chunks to avoid memory issues
         test_bar = tqdm(db.test)
         for data, target in test_bar:
             data, target = data.cuda(non_blocking=True), target.cuda(non_blocking=True)
-            feature, out = net(data)
+            feature, _ = net(data)
 
             total_num += data.size(0)
-            # compute cos similarity between each feature vector and feature bank ---> [B, N]
+            
+            # Compute cosine similarity more efficiently
             sim_matrix = torch.mm(feature, feature_bank)
-            # [B, K]
+            
+            # Get top-k similarities and indices
             sim_weight, sim_indices = sim_matrix.topk(k=k, dim=-1)
-            # [B, K]
+            
+            # Gather corresponding labels
             sim_labels = torch.gather(feature_labels.expand(data.size(0), -1), dim=-1, index=sim_indices)
+            
+            # Apply temperature scaling
             sim_weight = (sim_weight / temperature).exp()
 
-            # counts for each class
-            one_hot_label = torch.zeros(data.size(0) * k, c, device=sim_labels.device)
-            # [B*K, C]
-            one_hot_label = one_hot_label.scatter(dim=-1, index=sim_labels.view(-1, 1), value=1.0)
-            # weighted score ---> [B, C]
-            pred_scores = torch.sum(one_hot_label.view(data.size(0), -1, c) * sim_weight.unsqueeze(dim=-1), dim=1)
+            # More efficient one-hot encoding and weighted scoring
+            batch_size = data.size(0)
+            one_hot_label = torch.zeros(batch_size, k, c, device=sim_labels.device)
+            one_hot_label.scatter_(dim=-1, index=sim_labels.unsqueeze(-1), value=1.0)
+            
+            # Weighted score computation
+            pred_scores = torch.sum(one_hot_label * sim_weight.unsqueeze(-1), dim=1)
 
             pred_labels = pred_scores.argsort(dim=-1, descending=True)
             total_top1 += torch.sum((pred_labels[:, :1] == target.unsqueeze(dim=-1)).any(dim=-1).float()).item()
