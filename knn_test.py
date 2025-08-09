@@ -4,18 +4,26 @@
 import torch
 from tqdm import tqdm
 
+
 def test(net, db):
     temperature = 0.5
     k = 200
     c = 10
 
+    device = next(net.parameters()).device
+    is_cuda = device.type == "cuda"
+
     net.eval()
     total_top1, total_top5, total_num, feature_bank, target_bank = 0.0, 0.0, 0, [], []
-    with torch.no_grad():
+    with torch.inference_mode():
         # generate feature bank and target bank
         for data, target in tqdm(db.memory, desc='Feature extracting'):
             target_bank.append(target)
-            feature, out = net(data.cuda(non_blocking=True))
+            if is_cuda:
+                data = data.cuda(non_blocking=True).to(memory_format=torch.channels_last)
+            else:
+                data = data.to(device)
+            feature, out = net(data)
             feature_bank.append(feature)
         # [D, N]
         feature_bank = torch.cat(feature_bank, dim=0).t().contiguous()
@@ -24,7 +32,12 @@ def test(net, db):
         # loop test data to predict the label by weighted knn search
         test_bar = tqdm(db.test)
         for data, target in test_bar:
-            data, target = data.cuda(non_blocking=True), target.cuda(non_blocking=True)
+            if is_cuda:
+                data = data.cuda(non_blocking=True).to(memory_format=torch.channels_last)
+                target = target.cuda(non_blocking=True)
+            else:
+                data = data.to(device)
+                target = target.to(device)
             feature, out = net(data)
 
             total_num += data.size(0)
